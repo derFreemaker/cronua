@@ -1,5 +1,7 @@
 local cronua = require("cronua")
 
+local thread
+
 local scheduler = cronua.Scheduler.new({
     callbacks = {
         get_time_point_ms = function()
@@ -7,16 +9,25 @@ local scheduler = cronua.Scheduler.new({
         end,
 
         run_task = function(id)
-            error("run task: " .. tostring(id))
+            thread = coroutine.create(function(num)
+                for i = 1, num * 10000000 do
+                    local x = 1
+                end
+            end)
+            coroutine.resume(thread, id)
+            coroutine.close(thread)
+            thread = nil
         end,
         yield_current_task = function()
-            error("yield current task")
+            coroutine.yield()
         end,
 
         set_hook = function(hook, instructions)
-            debug.sethook(hook, "", instructions)
+            debug.sethook(thread or coroutine.running(), hook, "", instructions)
         end,
-        clear_hook = debug.sethook,
+        clear_hook = function()
+            debug.sethook(thread or coroutine.running())
+        end,
 
         idle = function(ms)
             local sleep_end = os.clock() + ms * 1000
@@ -30,4 +41,8 @@ local scheduler = cronua.Scheduler.new({
     aging_factor = 0.2,
 })
 
-print(string.format("%d instructions per millisecond", scheduler.instructions_per_ms))
+for _ = 1, 10000 do
+    scheduler:add_task()
+end
+
+scheduler:run()

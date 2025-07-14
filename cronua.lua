@@ -1,4 +1,8 @@
-local math = math
+local math_floor = math.floor
+
+local table_insert = table.insert
+local table_remove = table.remove
+local table_sort = table.sort
 
 ---@class Cronua.Task.Id : integer
 
@@ -22,7 +26,7 @@ local State = {
 ---@field id Cronua.Task.Id
 ---
 ---@field priority Cronua.Priority
----@field schedule_time_ms number
+---@field schedule_time_ms number?
 ---@field weight number
 ---
 ---@field state Cronua.Task.State
@@ -66,7 +70,7 @@ local function get_base_IPMS(options)
         options.callbacks.clear_hook()
 
         local time = options.callbacks.get_time_point_ms() - start_time
-        instructions_per_ms = math.floor(options.start_instructions / time)
+        instructions_per_ms = math_floor(options.start_instructions / time)
 
         running = false
     end, options.start_instructions)
@@ -107,8 +111,16 @@ function Scheduler.new(options)
     return setmetatable(instance, { __index = Scheduler })
 end
 
----@param priority Cronua.Priority
+---@param task_id Cronua.Task.Id
+---@return Cronua.Task
+function Scheduler:get_task(task_id)
+    return self.tasks[task_id]
+end
+
+---@param priority Cronua.Priority?
 function Scheduler:add_task(priority)
+    priority = priority or Priority.Normal
+
     self.task_counter = self.task_counter + 1
     local task_id = self.task_counter
 
@@ -117,14 +129,88 @@ function Scheduler:add_task(priority)
         id = task_id,
 
         priority = priority,
-        schedule_time_ms = self.options.callbacks.get_time_point_ms(),
         weight = priority,
 
         state = State.Ready,
     }
     self.tasks[task_id] = task
 
+    self:enqeue_task(task_id)
+
     return task
+end
+
+---@param task_id Cronua.Task.Id
+function Scheduler:enqeue_task(task_id)
+    local task = self:get_task(task_id)
+    task.schedule_time_ms = self.options.callbacks.get_time_point_ms()
+
+    if #self.runqueue == 0 then
+        self.runqueue[1] = task_id
+        return
+    end
+
+    for index, id in ipairs(self.runqueue) do
+        local other_task = self:get_task(id)
+        if other_task.weight < task.weight then
+            table_insert(self.runqueue, index + 1, task_id)
+            break
+        end
+    end
+end
+
+---@param task_id Cronua.Task.Id
+function Scheduler:deqeue_task(task_id)
+    for index, id in ipairs(self.runqueue) do
+        if id == task_id then
+            table_remove(self.runqueue, index)
+        end
+    end
+end
+
+function Scheduler:update_weights()
+    local time_point_ms = self.options.callbacks.get_time_point_ms()
+
+    for _, task in pairs(self.tasks) do
+        local weight_before = task.weight
+        task.weight = task.priority * ((time_point_ms - task.schedule_time_ms) / 1000 * self.options.aging_factor) +
+            task.weight
+        print(string.format("task: %d weight: %.2f -> %.2f", task.id, weight_before, task.weight))
+    end
+
+    table_sort(self.runqueue, function(a, b)
+        return self:get_task(a).weight >= self:get_task(b).weight
+    end)
+end
+
+function Scheduler:run()
+    while true do
+        if next(self.tasks, nil) == nil then
+            break
+        end
+
+        if #self.runqueue == 0 then
+            self.options.callbacks.idle(10)
+        else
+            local task_id = self.runqueue[#self.runqueue]
+            self.runqueue[#self.runqueue] = nil
+            local task = self:get_task(task_id)
+
+            local instructions = task.weight * self.instructions_per_ms
+            print(string.format("running task: %d with instructions %d", task_id, instructions))
+            self.options.callbacks.set_hook(function()
+                print("switching from task: " .. task_id)
+
+                self.options.callbacks.clear_hook()
+                self.options.callbacks.yield_current_task()
+            end, instructions)
+
+            self.options.callbacks.run_task(task_id)
+            self.options.callbacks.clear_hook()
+
+            print("completed task: " .. task_id)
+        end
+    end
 end
 
 ---@class Cronua
