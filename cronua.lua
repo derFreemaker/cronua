@@ -1,4 +1,7 @@
-local math_floor = math.floor
+local tmp_file = io.open("task_weight_switch.txt", "w+")
+if not tmp_file then
+    error("tmp_file error")
+end
 
 local table_insert = table.insert
 local table_remove = table.remove
@@ -34,18 +37,14 @@ local State = {
 ---@class Cronua.Scheduler.Callbacks
 ---@field get_time_point_ms fun() : number return time in seconds
 ---
----@field run_task fun(id: Cronua.Task.Id) : nil
----@field yield_current_task fun() : nil
----
----@field set_hook fun(hook: (fun() : nil), instructions: integer) : nil
----@field clear_hook fun() : nil
+---@field run_task fun(task: Cronua.Task, instructions: integer) : nil
 ---
 ---@field idle fun(ms: integer) : nil
 
 ---@class Cronua.Scheduler.Options
 ---@field callbacks Cronua.Scheduler.Callbacks
 ---
----@field start_instructions integer used to find out how many instructions can be done per second
+---@field instructions_per_ms integer
 ---@field min_time_ms number minimum time a task gets
 ---
 ---@field aging_factor number
@@ -53,46 +52,10 @@ local State = {
 ---@class Cronua.Scheduler
 ---@field options Cronua.Scheduler.Options
 ---
----@field instructions_per_ms integer
----
 ---@field runqueue Cronua.Task.Id[]
----@field tasks { Cronua.TaskId: Cronua.Task }
+---@field tasks { [Cronua.Task.Id]: Cronua.Task }
 ---@field task_counter integer
 local Scheduler = {}
-
----@param options Cronua.Scheduler.Options
-local function get_base_IPMS(options)
-    local start_time
-    local instructions_per_ms
-    local running = true
-
-    options.callbacks.set_hook(function()
-        options.callbacks.clear_hook()
-
-        local time = options.callbacks.get_time_point_ms() - start_time
-        instructions_per_ms = math_floor(options.start_instructions / time)
-
-        running = false
-    end, options.start_instructions)
-
-    start_time = options.callbacks.get_time_point_ms()
-
-    -- work load
-    while running do
-        local function work(x)
-            for k = 1, 10 do
-                x = x + k
-            end
-        end
-
-        for j = 1, 10 do
-            local x = j * j + j - 1
-            work(x)
-        end
-    end
-
-    return instructions_per_ms
-end
 
 ---@param options Cronua.Scheduler.Options
 ---@return Cronua.Scheduler
@@ -100,8 +63,6 @@ function Scheduler.new(options)
     ---@type Cronua.Scheduler
     local instance = {
         options = options,
-
-        instructions_per_ms = get_base_IPMS(options),
 
         runqueue = {},
         tasks = {},
@@ -135,13 +96,18 @@ function Scheduler:add_task(priority)
     }
     self.tasks[task_id] = task
 
-    self:enqeue_task(task_id)
+    self:enqeueu_task(task_id)
 
     return task
 end
 
 ---@param task_id Cronua.Task.Id
-function Scheduler:enqeue_task(task_id)
+function Scheduler:remove_task(task_id)
+    self.tasks[task_id] = nil
+end
+
+---@param task_id Cronua.Task.Id
+function Scheduler:enqeueu_task(task_id)
     local task = self:get_task(task_id)
     task.schedule_time_ms = self.options.callbacks.get_time_point_ms()
 
@@ -150,20 +116,32 @@ function Scheduler:enqeue_task(task_id)
         return
     end
 
+    local inserted = false
     for index, id in ipairs(self.runqueue) do
         local other_task = self:get_task(id)
-        if other_task.weight < task.weight then
+        local weight_dif = task.weight - other_task.weight
+        if weight_dif > 0 then
             table_insert(self.runqueue, index + 1, task_id)
+            inserted = true
+            break
+        elseif weight_dif == 0 then
+            table_insert(self.runqueue, index, task_id)
+            inserted = true
             break
         end
+    end
+
+    if not inserted then
+        table_insert(self.runqueue, 1, task_id)
     end
 end
 
 ---@param task_id Cronua.Task.Id
-function Scheduler:deqeue_task(task_id)
+function Scheduler:deqeueu_task(task_id)
     for index, id in ipairs(self.runqueue) do
         if id == task_id then
             table_remove(self.runqueue, index)
+            break
         end
     end
 end
@@ -173,17 +151,19 @@ function Scheduler:update_weights()
 
     for _, task in pairs(self.tasks) do
         local weight_before = task.weight
-        task.weight = task.priority * ((time_point_ms - task.schedule_time_ms) / 1000 * self.options.aging_factor) +
-            task.weight
-        print(string.format("task: %d weight: %.2f -> %.2f", task.id, weight_before, task.weight))
+        task.weight = task.weight +
+            (task.priority / 2) * ((time_point_ms - task.schedule_time_ms) / 1000 * self.options.aging_factor)
+        tmp_file:write(("Task: %d weight: %.2f -> %.2f\n"):format(task.id, weight_before, task.weight))
+        tmp_file:flush()
     end
 
     table_sort(self.runqueue, function(a, b)
-        return self:get_task(a).weight >= self:get_task(b).weight
+        return self:get_task(a).weight < self:get_task(b).weight
     end)
 end
 
 function Scheduler:run()
+    local i = 0
     while true do
         if next(self.tasks, nil) == nil then
             break
@@ -196,20 +176,28 @@ function Scheduler:run()
             self.runqueue[#self.runqueue] = nil
             local task = self:get_task(task_id)
 
-            local instructions = task.weight * self.instructions_per_ms
-            print(string.format("running task: %d with instructions %d", task_id, instructions))
-            self.options.callbacks.set_hook(function()
-                print("switching from task: " .. task_id)
+            local instructions = self.options.instructions_per_ms
+            -- local time_ms = math_max(task.priority * task.weight, self.options.min_time_ms) / 10
+            -- local instructions = math_floor(self.instructions_per_ms * time_ms)
+            -- print(string.format("running task: %d time: %.2fms weight: %.2f instructions %d", task_id, time_ms,
+            --     task.weight, instructions))
 
-                self.options.callbacks.clear_hook()
-                self.options.callbacks.yield_current_task()
-            end, instructions)
+            task.weight = task.priority
+            self.options.callbacks.run_task(task, 1000) --//TODO
 
-            self.options.callbacks.run_task(task_id)
-            self.options.callbacks.clear_hook()
-
-            print("completed task: " .. task_id)
+            if task.state == State.Dead then
+                print("completed task: " .. task_id)
+                self:remove_task(task_id)
+            else
+                self:enqeueu_task(task_id)
+            end
         end
+
+        if i == 20 then
+            i = 0
+            self:update_weights()
+        end
+        i = i + 1
     end
 end
 
