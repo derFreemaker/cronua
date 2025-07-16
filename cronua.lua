@@ -1,8 +1,3 @@
-local tmp_file = io.open("task_weight_switch.txt", "w+")
-if not tmp_file then
-    error("tmp_file error")
-end
-
 local table_insert = table.insert
 local table_remove = table.remove
 local table_sort = table.sort
@@ -150,11 +145,10 @@ function Scheduler:update_weights()
     local time_point_ms = self.options.callbacks.get_time_point_ms()
 
     for _, task in pairs(self.tasks) do
-        local weight_before = task.weight
+        -- local weight_before = task.weight
         task.weight = task.weight +
-            (task.priority / 2) * ((time_point_ms - task.schedule_time_ms) / 1000 * self.options.aging_factor)
-        tmp_file:write(("Task: %d weight: %.2f -> %.2f\n"):format(task.id, weight_before, task.weight))
-        tmp_file:flush()
+            (task.priority / 2) * ((time_point_ms - task.schedule_time_ms) / 10 * self.options.aging_factor)
+        -- print(("Task: %d weight: %.2f -> %.2f\n"):format(task.id, weight_before, task.weight))
     end
 
     table_sort(self.runqueue, function(a, b)
@@ -176,14 +170,13 @@ function Scheduler:run()
             self.runqueue[#self.runqueue] = nil
             local task = self:get_task(task_id)
 
-            local instructions = self.options.instructions_per_ms
-            -- local time_ms = math_max(task.priority * task.weight, self.options.min_time_ms) / 10
-            -- local instructions = math_floor(self.instructions_per_ms * time_ms)
-            -- print(string.format("running task: %d time: %.2fms weight: %.2f instructions %d", task_id, time_ms,
-            --     task.weight, instructions))
+            local time_ms = math.max(task.priority * task.weight, self.options.min_time_ms)
+            local instructions = math.floor(self.options.instructions_per_ms * time_ms)
+            print(("running task: %d time: %.2fms weight: %.2f instructions %d")
+                :format(task_id, time_ms, task.weight, instructions))
 
-            task.weight = task.priority
-            self.options.callbacks.run_task(task, 1000) --//TODO
+            task.weight = math.max(task.weight / 2, task.priority)
+            self.options.callbacks.run_task(task, instructions)
 
             if task.state == State.Dead then
                 print("completed task: " .. task_id)

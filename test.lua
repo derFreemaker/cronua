@@ -1,41 +1,42 @@
-local HookManager = require("hook_manager")
-local hook_manager = HookManager.new()
+-- local HookManager = require("hook_manager")
+-- local hook_manager = HookManager.new()
 
 local cronua = require("cronua")
 
 local threads = {}
 
-local function get_base_IPMS()
-    local start_time
-    local instructions_per_ms
-
+local function get_base_IPS()
     local thread = coroutine.create(function()
-        local function work(x)
-            for k = 1, 10 do
-                x = x + k
+        while true do
+            local function work(x)
+                for k = 1, 10 do
+                    x = x + k
+                end
             end
-        end
 
-        for j = 1, 10 do
-            local x = j * j + j - 1
-            work(x)
+            for j = 1, 10 do
+                local x = j * j + j - 1
+                work(x)
+            end
         end
     end)
 
-    debug.sethook(thread, function()
-        debug.sethook(thread)
+    -- debug.sethook(thread, function()
+    --     debug.sethook(thread)
 
-        local time = os.clock() * 1000 - start_time
-        instructions_per_ms = math.floor(1000000 / time)
+    --     local time = os.clock() * 1000 - start_time
+    --     instructions_per_ms = math.floor(1000000 / time)
 
-        coroutine.yield()
-    end, 1000000)
+    -- end, "", 1000000)
 
-    start_time = os.clock() * 1000
+    local instructions = 1000000
+    coroutine.yieldafterinstructions(thread, instructions)
 
+    local start_time = os.clock()
     coroutine.resume(thread)
+    local time = os.clock() - start_time
 
-    return instructions_per_ms
+    return math.floor(instructions / time)
 end
 
 local scheduler = cronua.Scheduler.new({
@@ -53,14 +54,6 @@ local scheduler = cronua.Scheduler.new({
                 }
 
                 thread.thread = coroutine.create(function(num)
-                    local task_hook_manager = HookManager.new()
-                    local function hook()
-                        print("switching from task: " .. task.id)
-                        print(debug.getinfo(thread.thread, 2, "l").currentline)
-                        coroutine.yield()
-                    end
-                    task_hook_manager:register(hook, "", instructions, "scheduler")
-
                     local function work(x)
                         for k = 1, 10 do
                             x = x + k
@@ -72,14 +65,13 @@ local scheduler = cronua.Scheduler.new({
                         work(x)
                     end
 
-                    task_hook_manager:close()
                     thread.finished = true
                 end)
                 threads[task.id] = thread
             end
 
-            print("run task: " .. tostring(task.id))
-            coroutine.resume(thread.thread, task.id)
+            coroutine.yieldafterinstructions(thread.thread, instructions)
+            print("task:", task.id, "stopped", coroutine.resume(thread.thread, task.id))
 
             if thread.finished then
                 task.state = cronua.State.Dead
@@ -95,17 +87,17 @@ local scheduler = cronua.Scheduler.new({
         end,
     },
 
-    instructions_per_ms = get_base_IPMS(),
-    min_time_ms = 10,
+    instructions_per_ms = math.floor(get_base_IPS() / 1000),
+    min_time_ms = 50,
 
     aging_factor = 0.2,
 })
 
-for i = 1, 50 do
+for i = 1, 100 do
     scheduler:add_task(i % 4 + 1)
 end
 
 scheduler:run()
-hook_manager:close()
+-- hook_manager:close()
 
 print("$END$")

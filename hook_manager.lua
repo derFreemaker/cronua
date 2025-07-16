@@ -166,23 +166,16 @@ function HookManager:close()
     _managers[self.thread] = nil
 end
 
-local in_hook_call = false
-
 ---@param event Hook.Event
 ---@param new_line integer?
 ---@param debug_ptr lightuserdata
 function HookManager:execute(event, new_line, debug_ptr)
-    if in_hook_call then
-        return
-    end
-    in_hook_call = true
-
     local mask = event_to_mask_map[event]
 
     if mask == HookMask.none then
         for _, hook in pairs(self.map[mask]) do
             hook.got_count = hook.got_count + self.count
-            if hook.got_count == hook.count then
+            if hook.got_count >= hook.count then
                 hook.got_count = 0
                 hook.func(event, new_line, debug_ptr)
             end
@@ -195,8 +188,6 @@ function HookManager:execute(event, new_line, debug_ptr)
     for _, hook in pairs(self.map[mask]) do
         hook.func(event, new_line, debug_ptr)
     end
-
-    in_hook_call = false
 end
 
 ---@param hook Hook.Func
