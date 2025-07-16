@@ -1,6 +1,3 @@
--- local HookManager = require("hook_manager")
--- local hook_manager = HookManager.new()
-
 local cronua = require("cronua")
 
 local threads = {}
@@ -20,14 +17,6 @@ local function get_base_IPS()
             end
         end
     end)
-
-    -- debug.sethook(thread, function()
-    --     debug.sethook(thread)
-
-    --     local time = os.clock() * 1000 - start_time
-    --     instructions_per_ms = math.floor(1000000 / time)
-
-    -- end, "", 1000000)
 
     local instructions = 1000000
     coroutine.yieldafterinstructions(thread, instructions)
@@ -71,7 +60,7 @@ local scheduler = cronua.Scheduler.new({
             end
 
             coroutine.yieldafterinstructions(thread.thread, instructions)
-            print("task:", task.id, "stopped", coroutine.resume(thread.thread, task.id))
+            print("task: " .. task.id .. " stopped", coroutine.resume(thread.thread, task.id))
 
             if thread.finished then
                 task.state = cronua.State.Dead
@@ -98,6 +87,6 @@ for i = 1, 100 do
 end
 
 scheduler:run()
--- hook_manager:close()
 
 print("$END$")
+

@@ -170,7 +170,7 @@ function Scheduler:run()
             self.runqueue[#self.runqueue] = nil
             local task = self:get_task(task_id)
 
-            local time_ms = math.max(task.priority * task.weight, self.options.min_time_ms)
+            local time_ms = math.max((task.priority * task.weight) / 3, self.options.min_time_ms)
             local instructions = math.floor(self.options.instructions_per_ms * time_ms)
             print(("running task: %d time: %.2fms weight: %.2f instructions %d")
                 :format(task_id, time_ms, task.weight, instructions))
